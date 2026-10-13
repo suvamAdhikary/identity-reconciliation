@@ -1,73 +1,205 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="200" alt="Nest Logo" /></a>
-</p>
+# Identity Reconciliation Service
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+[![CI](https://github.com/suvamAdhikary/identity-reconciliation/actions/workflows/ci.yml/badge.svg)](https://github.com/suvamAdhikary/identity-reconciliation/actions/workflows/ci.yml)
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+A NestJS-based backend service for reconciling and linking customer identities across multiple contact points (email, phone).
 
-## Description
+## Overview
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+This service implements an identity reconciliation system that consolidates customer information from various sources. When a customer interacts through different channels (email, phone, web forms), the system intelligently links these interactions to maintain a unified customer profile.
 
-## Installation
+## Data Model
 
-```bash
-$ npm install
+The system uses a contact entity structure with the following relationships:
+
+### Contact Entity
+- **Primary Contact**: The root contact representing a unique customer identity
+- **Secondary Contact**: Linked contacts that share the same underlying customer identity
+
+### Key Fields
+- `email`: Customer's email address (nullable, indexed)
+- `phoneNumber`: Customer's phone number (nullable, indexed)
+- `linkedId`: Foreign key pointing to the primary contact (null for primary contacts)
+- `linkPrecedence`: Enum value - "primary" or "secondary"
+- `createdAt`, `updatedAt`, `deletedAt`: Standard audit timestamps
+
+### Reconciliation Logic
+
+The service handles several edge cases when identifying and linking contacts:
+
+1. **Exact Match**: When both email and phone match an existing contact, return the existing identity
+2. **Partial Match**: When either email or phone matches, link to the existing primary contact
+3. **Multiple Primaries**: When email matches one primary and phone matches another, merge the identities by:
+   - Converting the newer primary to secondary
+   - Linking it to the older primary
+   - Cascading all secondary contacts of the newer primary to the older primary
+4. **No Match**: Create a new primary contact when neither email nor phone exist in the system
+5. **Null Handling**: Gracefully handle null values in email or phone fields without creating false links
+
+### Data Integrity Constraints
+- At least one of email or phoneNumber must be provided
+- Composite unique index on (email, phoneNumber) pairs
+- Soft delete support via deletedAt timestamp
+
+## API Endpoints
+
+### POST `/identify`
+
+Identify and reconcile customer contacts.
+
+**Request Body:**
+```json
+{
+  "email": "customer@example.com",
+  "phoneNumber": "1234567890"
+}
 ```
 
-## Running the app
-
-```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+**Response:**
+```json
+{
+  "contact": {
+    "primaryContactId": 1,
+    "emails": ["customer@example.com", "alternate@example.com"],
+    "phoneNumbers": ["1234567890", "0987654321"],
+    "secondaryContactIds": [2, 3]
+  }
+}
 ```
 
-## Test
+**Validation Rules:**
+- At least one of `email` or `phoneNumber` must be provided
+- Email must be valid email format if provided
+- Phone number must be numeric string if provided
 
+## Local Development
+
+### Prerequisites
+- Node.js 20.x or higher
+- PostgreSQL 14.x or higher
+- npm 9.x or higher
+
+### Setup
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/suvamAdhikary/identity-reconciliation.git
+   cd identity-reconciliation
+   ```
+
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
+
+3. **Configure environment variables**
+   
+   Create a `.env` file in the project root:
+   ```env
+   DATABASE_HOST=localhost
+   DATABASE_PORT=5432
+   DATABASE_USER=postgres
+   DATABASE_PASSWORD=yourpassword
+   DATABASE_NAME=identity_reconciliation
+   NODE_ENV=development
+   PORT=3000
+   ```
+
+4. **Setup PostgreSQL database**
+   ```bash
+   # Using psql
+   psql -U postgres
+   CREATE DATABASE identity_reconciliation;
+   \q
+   ```
+
+5. **Run database migrations**
+   ```bash
+   npm run migration:run
+   ```
+
+### Running the Application
+
+**Development mode with hot reload:**
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npm run start:dev
 ```
 
-## Support
+**Production mode:**
+```bash
+npm run build
+npm run start:prod
+```
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+The API will be available at `http://localhost:3000`
 
-## Stay in touch
+### Testing
 
-- Author - [Kamil Myśliwiec](https://kamilmysliwiec.com)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+**Run all unit tests:**
+```bash
+npm test
+```
+
+**Run tests in watch mode:**
+```bash
+npm run test:watch
+```
+
+**Run end-to-end tests:**
+```bash
+npm run test:e2e
+```
+
+**Generate test coverage report:**
+```bash
+npm run test:cov
+```
+
+### Code Quality
+
+**Run linter:**
+```bash
+npm run lint
+```
+
+**Format code:**
+```bash
+npm run format
+```
+
+## Project Structure
+
+```
+identity-reconciliation/
+├── src/
+│   ├── app.controller.ts       # Main application controller
+│   ├── app.controller.spec.ts  # Controller unit tests
+│   ├── app.module.ts           # Root application module
+│   ├── app.service.ts          # Core business logic
+│   └── main.ts                 # Application entry point
+├── test/
+│   ├── app.e2e-spec.ts         # End-to-end tests
+│   └── jest-e2e.json           # E2E test configuration
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # GitHub Actions CI pipeline
+├── ROADMAP.md                  # Project roadmap and decisions
+└── package.json                # Project dependencies and scripts
+```
+
+## Technology Stack
+
+- **Framework**: NestJS 10.x
+- **Language**: TypeScript 5.x
+- **Database**: PostgreSQL with TypeORM
+- **Testing**: Jest + Supertest
+- **Linting**: ESLint + Prettier
+- **CI/CD**: GitHub Actions
 
 ## License
 
-Nest is [MIT licensed](LICENSE).
+This project is licensed under the UNLICENSED license - see the LICENSE file for details.
+
+## Author
+
+[Suvam Adhikary](https://github.com/suvamAdhikary)
